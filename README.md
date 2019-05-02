@@ -3,6 +3,17 @@
 ## ncm.js
 FB2K ESLyric 下的能获取网易云音乐歌词并进行一些处理的脚本
 
+修改说明：加强对日语歌兼容性
+
+使用说明：
+打开"设置->Tools->ESLyric"，
+
+找到"Lyric Search"，把"Lyric matching level"改成30左右。
+
+因为日语歌翻唱很多，歌名也比较混乱，比如后面加个"feat.","(Cover)","(カバー)"什么的。
+
+日语歌歌名重名的似乎很少，所以匹配到歌名一般就OK，我的fork对这里进行了修改。
+
 ### 设置歌词输出顺序,删除即不获取
 old_merge:并排合并歌词,newtype:并列合并,tran:翻译,origin:原版歌词；
 

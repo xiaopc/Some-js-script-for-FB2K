@@ -185,7 +185,7 @@ function getLyricInfo(info, exact) {
     //搜索
     var s = "";
     if(exact)
-        s = artist ? (title + "-" + artist) : title;
+        s = artist ? (title + "+" + artist) : title;
     else
         s = title;
     //searchURL = "http://music.163.com/api/search/get/web?csrf_token=";//如果下面的没用,试试改成这句

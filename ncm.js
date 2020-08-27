@@ -21,12 +21,12 @@
 // new_merge:并排合并歌词,在卡拉OK模式下仅高亮原语言歌词
 //           不推荐使用,仅能即时获取歌词即时使用,不能保存,且若原词为全英文或英文符号则翻译前会显示时间轴
 var lrc_order = [
-        "old_merge",
-        "newtype",
-        "origin",
-        "tran", 
-		//"new_merge"
-    ];
+    "newtype",
+    "old_merge",
+    "origin",
+    "tran",
+    //"new_merge"
+];
 
 // 搜索请求返回的最多结果数,如果经常搜不到试着改小或改大
 var limit = 4;
@@ -59,7 +59,7 @@ var min_exact_matching = [85, 80];
 
 // 最小模糊匹配度
 // 模糊匹配：不考虑艺术家字段
-var min_fuzzy_matching = 60;
+var min_fuzzy_matching = 80;
 
 // 输出调试信息
 var debug = true;
@@ -106,7 +106,7 @@ function start_search(info, callback) {
     var songs = lyricInfo[0];
     var songid = lyricInfo[1];
     var res_id = songs[songid].id;
-    var res_name = songs[songid].name;
+    var res_name = info.Title + songs[songid].name.substr(lyricInfo[2].length); // 必须要完整包括搜索的曲名才能添加？
     var res_album = songs[songid].album.name;
     var res_artist = songs[songid].artist_combine;
     debug && console("selected #" + res_id + ": " + res_name + "-" + res_artist);
@@ -132,70 +132,58 @@ function start_search(info, callback) {
 
     // 处理/添加歌词
     var ncm_lrc = json(xmlHttp.responseText);
-    var issettran = 0;
-    var issetlrc = 0;
-    if (!ncm_lrc.lrc)
-        return false;
-    if (ncm_lrc.tlyric && ncm_lrc.tlyric.lyric) {
-        tranlrc = ncm_lrc.tlyric.lyric.replace(/(〔|〕|〈|〉|《|》|「|」|『|』|〖|〗|【|】|{|}|\/)/g, "");
-        issettran = 1;
-    } else debug && console("no translation");
-    if (ncm_lrc.lrc.lyric)
-        issetlrc = 1;
+    // （原语言）歌词
+    var lyric = false;
+    if (ncm_lrc.lrc && ncm_lrc.lrc.lyric)
+        lyric = ncm_lrc.lrc.lyric;
     else
-        debug && console("no lyric");
-    if (!lrc_order.length)
-        lrc_order = ["new_merge", "newtype", "origin", "tran"];
-
+        debug && console("no (original) lyric");
+    // 翻译歌词
+    var tranlrc = false;
+    if (ncm_lrc.tlyric && ncm_lrc.tlyric.lyric) {
+        tranlrc = ncm_lrc.tlyric.lyric;
+        tranlrc = tranlrc.replace(/(〔|〕|〈|〉|《|》|「|」|『|』|〖|〗|【|】|{|}|\/)/g, "");
+    } else debug && console("no translation");
+    // 顺序默认值
+    lrc_order = lrc_order || ["new_merge", "newtype", "origin", "tran"];
+    // 回调开始
     var newLyric = callback.CreateLyric();
     for (var key in lrc_order) {
+        newLyric.Title = res_name;
+        newLyric.Artist = res_artist;
+        newLyric.Album = res_album;
         switch (lrc_order[key]) {
             case "new_merge" :
-                if (issetlrc && issettran) {
-                    newLyric.LyricText = lrc_newtype(ncm_lrc.lrc.lyric, tranlrc, false);
-                    newLyric.Title = res_name;
-                    newLyric.Artist = res_artist;
-                    newLyric.Album = res_album;
+                if (lyric && tranlrc) {
+                    newLyric.LyricText = lrc_newtype(lyric, tranlrc, false);
                     newLyric.Source = "(并排)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
                 break;
             case "origin" :
-                if (issetlrc) {
-                    newLyric.LyricText = ncm_lrc.lrc.lyric;
-                    newLyric.Title = res_name;
-                    newLyric.Artist = res_artist;
-                    newLyric.Album = res_album;
+                if (lyric) {
+                    newLyric.LyricText = lyric;
                     newLyric.Source = "(原词)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
                 break;
             case "tran" :
-                if (issettran) {
+                if (tranlrc) {
                     newLyric.LyricText = tranlrc;
-                    newLyric.Title = res_name;
-                    newLyric.Artist = res_artist;
-                    newLyric.Album = res_album;
                     newLyric.Source = "(翻译)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
                 break;
             case "newtype":
-                if (issetlrc && issettran) {
-                    newLyric.LyricText = lrc_newtype(ncm_lrc.lrc.lyric, tranlrc, true);
-                    newLyric.Title = res_name;
-                    newLyric.Artist = res_artist;
-                    newLyric.Album = res_album;
+                if (lyric && tranlrc) {
+                    newLyric.LyricText = lrc_newtype(lyric, tranlrc, true);
                     newLyric.Source = "(并列)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
                 break;
             case "old_merge" :
-                if (issetlrc && issettran) {
-                    newLyric.LyricText = lrc_merge(ncm_lrc.lrc.lyric, tranlrc);
-                    newLyric.Title = res_name;
-                    newLyric.Artist = res_artist;
-                    newLyric.Album = res_album;
+                if (lyric && tranlrc) {
+                    newLyric.LyricText = lrc_merge(lyric, tranlrc);
                     newLyric.Source = "(并排-旧)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
@@ -291,7 +279,7 @@ function getLyricInfo(info, exact) {
     if (song_id == -1)
         return;
     else
-        return [songs, song_id];
+        return [songs, song_id, title];
 }
 
 /**
@@ -376,7 +364,7 @@ function json(text) {
 }
 
 /**
- * 双语歌词合并
+ * 歌词处理/合并
  */
 
 /**

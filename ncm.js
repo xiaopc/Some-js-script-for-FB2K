@@ -115,8 +115,8 @@ function start_search(info, callback) {
     var lyricURL = "https://music.163.com/api/song/lyric?os=pc&id=" + res_id + "&lv=-1&kv=-1&tv=-1";
     try {
         xmlHttp.Open("GET", lyricURL, false);
-        xmlHttp.Option(4) = 13056;
-        xmlHttp.Option(6) = false;
+        // xmlHttp.Option(4) = 13056;  // 应为 5: WinHttpRequestOption_SelectCertificate
+        // xmlHttp.Option(6) = false; // WinHttpRequestOption_EnableRedirects
         xmlHttp.SetRequestHeader("Cookie", "appver=1.5.0.75771");
         xmlHttp.SetRequestHeader("Referer", "https://music.163.com/");
         xmlHttp.SetRequestHeader("Connection", "Close");
@@ -214,11 +214,9 @@ function getLyricInfo(info, exact) {
     var post_data = 'hlpretag=<span class="s-fc7">&hlposttag=</span>&s=' + encodeURIComponent(s) + '&type=1&offset=0&total=true&limit=' + limit;
     try {
         xmlHttp.Open("POST", searchURL, false);
-        xmlHttp.Option(4) = 13056;
-        xmlHttp.Option(6) = false;
         xmlHttp.SetRequestHeader("Host", "music.163.com");
         xmlHttp.SetRequestHeader("Origin", "https://music.163.com");
-        xmlHttp.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 6.3; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/42.0.2311.90 Safari/537.36");
+        xmlHttp.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) (KHTML, like Gecko) Chrome/55.0.2919.83 Safari/537.36");
         xmlHttp.SetRequestHeader("Content-Type", "application/x-www-form-urlencoded");
         xmlHttp.SetRequestHeader("Referer", "https://music.163.com/search/");
         xmlHttp.SetRequestHeader("Connection", "Close");

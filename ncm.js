@@ -45,13 +45,13 @@ var rm_suffix = [
     "（翻自",
 ]
 
-// 修复 newtype 歌词保存 翻译提前秒数 设为0则取消 如果翻译歌词跳的快看的难过,蕴情设为0.4-1.0
+// 修复 newtype 歌词保存 翻译提前秒数 设为0则取消 如果翻译歌词跳的快,酌情设为0.4-1.0
 var savefix = 0.01;
 
-// new_merge歌词翻译时间轴滞后秒数，防闪
+// new_merge 歌词翻译时间轴滞后秒数，防闪
 var timefix = 0.01;
 
-// 当timefix有效时设置offset(毫秒),防闪
+// 当timefix有效时设置 offset(毫秒),防闪
 var offset = -20;
 
 // 最小准确匹配度，分别为标题和艺术家字段
@@ -60,6 +60,11 @@ var min_exact_matching = [85, 80];
 // 最小模糊匹配度
 // 模糊匹配：不考虑艺术家字段
 var min_fuzzy_matching = 80;
+
+// 匹配曲目时长误差率
+// 如本地曲目时长 3 分钟，误差率为 10%，则仅匹配时长在 3 分 ± 18s 的在线曲目
+// 小于 0 则不使用这条规则
+var length_error_rate = 25;
 
 // 输出调试信息
 var debug = true;
@@ -94,7 +99,8 @@ function get_author() {
 function start_search(info, callback) {
     debug && console(
         "info.Title: " + info.Title + "\n" +
-        "info.Artist: " + info.Artist);
+        "info.Artist: " + info.Artist + "\n" +
+        "info.Length:" + info.Length);
     // 获取匹配歌曲，精确后模糊
     var lyricInfo = getLyricInfo(info, true);
     if (!lyricInfo) {
@@ -247,8 +253,7 @@ function getLyricInfo(info, exact) {
         cmp_name = del(ncm_name, rm_suffix);
         // 匹配曲名
         var p0 = compare(title, cmp_name);
-        debug && console(
-            "ncm_title: " + ncm_name + " match: " + p0);
+        debug && console("ncm_title: " + ncm_name + " match: " + p0);
         // 模糊匹配
         if (!exact) {
             if (p0 >= min_fuzzy_matching) {
@@ -258,6 +263,11 @@ function getLyricInfo(info, exact) {
                 continue;
             }
         }
+        // 匹配时长
+        var length_diff = Math.abs(songs[k].duration / 1000 - info.Length) / info.Length;
+        debug && console("duration: " + songs[k].duration / 1000 + "s, delta: " + length_diff);
+        if (length_error_rate > 0 && length_diff > length_error_rate / 100)
+            continue;
         // 精确匹配之匹配艺术家
         var artist_combine = [];
         // 合并艺术家信息

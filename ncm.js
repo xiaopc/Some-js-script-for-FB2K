@@ -13,30 +13,45 @@
  * 用户设置部分
  */
 
+// - 歌词显示
+
 // 歌词输出顺序,删除即不获取
-// old_merge:并排合并歌词
-// newtype:并列合并
-// tran:翻译
-// origin:原版歌词
-// new_merge:并排合并歌词,在卡拉OK模式下仅高亮原语言歌词
-//           不推荐使用,仅能即时获取歌词即时使用,不能保存,且若原词为全英文或英文符号则翻译前会显示时间轴
+//   same_line: 并排合并歌词
+//   new_line: 翻译在下一行，仿网易云
+//   tran: 翻译
+//   origin: 原文
+//   same_line_k: 并排合并歌词，在卡拉OK模式下仅高亮原语言歌词（其他模式会出现显示问题）
+//           不推荐使用,仅能即时获取歌词即时使用,不能保存
 var lrc_order = [
-    "newtype",
-    "old_merge",
+    "new_line",
+    "same_line",
+    "same_line_k",
     "origin",
     "tran",
-    //"new_merge"
 ];
+
+// new_line 翻译滚动时长 以及 same_line_k 翻译时间轴滞后时长
+// （秒），设为 0 则取消，如果翻译歌词跳得快，酌情设为 0.4-1.0
+var savefix = 0.01;
+
+// new_line 最后一句时长（秒）
+var new_line_last = 10;
+
+// 翻译外括号，可以为空
+//  括号示例：〔 〕〈 〉《 》「 」『 』〖 〗【 】( ) [ ] { }
+//  如果都为空的话，same_line 下原文与翻译没有间隔
+var bracket = [
+    ' ', // 左括号
+    ''   // 右括号
+];
+
+// 要从翻译中删除的括号
+var bracket_rm = /(〔|〕|〈|〉|《|》|「|」|『|』|〖|〗|【|】|{|}|\/)/g;
+
+// - 搜索
 
 // 搜索请求返回的最多结果数,如果经常搜不到试着改小或改大
 var limit = 4;
-
-//  改或删除翻译外括号
-// 提供一些括号〔 〕〈 〉《 》「 」『 』〖 〗【 】( ) [ ] { }
-var bracket = [
-    "「", //左括号
-    "」"  //右括号
-];
 
 // 去除标题附加内容
 var rm_suffix = [
@@ -44,15 +59,6 @@ var rm_suffix = [
     "（Cover：",
     "（翻自",
 ]
-
-// 修复 newtype 歌词保存 翻译提前秒数 设为0则取消 如果翻译歌词跳的快,酌情设为0.4-1.0
-var savefix = 0.01;
-
-// new_merge 歌词翻译时间轴滞后秒数，防闪
-var timefix = 0.01;
-
-// 当timefix有效时设置 offset(毫秒),防闪
-var offset = -20;
 
 // 最小准确匹配度，分别为标题和艺术家字段
 var min_exact_matching = [85, 80];
@@ -148,10 +154,10 @@ function start_search(info, callback) {
     var tranlrc = false;
     if (ncm_lrc.tlyric && ncm_lrc.tlyric.lyric) {
         tranlrc = ncm_lrc.tlyric.lyric;
-        tranlrc = tranlrc.replace(/(〔|〕|〈|〉|《|》|「|」|『|』|〖|〗|【|】|{|}|\/)/g, "");
+        tranlrc = tranlrc.replace(bracket_rm, "");
     } else debug && console("no translation");
     // 顺序默认值
-    lrc_order = lrc_order || ["new_merge", "newtype", "origin", "tran"];
+    lrc_order = lrc_order || ["same_line_k", "new_line", "origin", "tran"];
     // 回调开始
     var newLyric = callback.CreateLyric();
     for (var key in lrc_order) {
@@ -159,13 +165,6 @@ function start_search(info, callback) {
         newLyric.Artist = res_artist;
         newLyric.Album = res_album;
         switch (lrc_order[key]) {
-            case "new_merge" :
-                if (lyric && tranlrc) {
-                    newLyric.LyricText = lrc_newtype(lyric, tranlrc, false);
-                    newLyric.Source = "(并排)" + get_my_name();
-                    callback.AddLyric(newLyric);
-                }
-                break;
             case "origin" :
                 if (lyric) {
                     newLyric.LyricText = lyric;
@@ -180,17 +179,24 @@ function start_search(info, callback) {
                     callback.AddLyric(newLyric);
                 }
                 break;
-            case "newtype":
+            case "same_line_k" :
                 if (lyric && tranlrc) {
-                    newLyric.LyricText = lrc_newtype(lyric, tranlrc, true);
+                    newLyric.LyricText = lrc_merge_same_line_k(lyric, tranlrc);
+                    newLyric.Source = "(并排-测试)" + get_my_name();
+                    callback.AddLyric(newLyric);
+                }
+                break;
+            case "new_line":
+                if (lyric && tranlrc) {
+                    newLyric.LyricText = lrc_merge_new_line(lyric, tranlrc);
                     newLyric.Source = "(并列)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
                 break;
-            case "old_merge" :
+            case "same_line" :
                 if (lyric && tranlrc) {
-                    newLyric.LyricText = lrc_merge(lyric, tranlrc);
-                    newLyric.Source = "(并排-旧)" + get_my_name();
+                    newLyric.LyricText = lrc_merge_same_line(lyric, tranlrc);
+                    newLyric.Source = "(并排)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
                 break;
@@ -277,8 +283,7 @@ function getLyricInfo(info, exact) {
         songs[k].artist_combine = artist_combine.join("/");
         // 匹配艺术家
         var p1 = compare(artist, songs[k].artist_combine);
-        debug && console(
-            "ncm_artist: " + songs[k].artist_combine + " match: " + p1);
+        debug && console("ncm_artist: " + songs[k].artist_combine + " match: " + p1);
         if (p0 >= min_exact_matching[0] && p1 >= min_exact_matching[1]) {
             song_id = k;
             break;
@@ -291,7 +296,145 @@ function getLyricInfo(info, exact) {
 }
 
 /**
- * 辅助函数部分
+ * 歌词处理
+ */
+
+/**
+ * 分析时间轴并重排，返回 [ {time: string, time_ms: [毫秒, ...], text: ...}, ]
+ * @param String lrc 
+ */
+
+function lrc_timeline(lrc) {
+    // TODO: by 这些标记信息（好像网易云现在都没这部分？
+    lines = lrc.split("\n");
+    objs = []
+    for (var i in lines) {
+        // 分别为： 全部内容，所有时间戳，正文
+        var parts = /((?:\[(?:\d|\.|\:)*\])+)(.*)/g.exec(lines[i]);
+        if (parts == null || parts.length < 3) continue;
+        var times = timestamp_parser(parts[1]);
+        // 处理非时间戳情况
+        if (times.length == 0) {
+            // TODO
+            continue;
+        }
+        for (var j in times) {
+            objs.push({time: times[j][0], time_ms: timestamp_to_ms(times[j]), text: parts[2]});
+        }
+    }
+    var cmp = function (a, b) {
+        return a.time_ms - b.time_ms;
+    }
+    return objs.sort(cmp);
+}
+
+/**
+ * 将（可含多个）时间戳 string 转为 [[原串, mm, ss, (毫秒)], ...]
+ * @param String str 
+ */
+
+function timestamp_parser(str) {
+    var regex = /\[(\d{2}):(\d{2})(\.\d{2,3})?\]/g;
+    var lis = [], find = null;
+    while ((find = regex.exec(str)) != null) lis.push(find);
+    return lis;
+}
+
+/**
+ * 将 [原串, mm, ss, (毫秒)] 转为毫秒数
+ * @param Array arr
+ */
+
+function timestamp_to_ms(arr) {
+    return Number(arr[1]) * 60000 + Number(arr[2]) * 1000 + (arr.length > 3 ? Number(arr[3].substr(1)) * Math.pow(10, (4 - arr[3].length)) : 0);
+}
+
+function num_pad(num, length) {
+    length = length || 2;
+    return (Array(length).join("0") + Math.floor(num)).slice(-length);
+}
+
+function timestamp_to_str(t) {
+    return '[' + num_pad(t / 60000) + ':' + num_pad(t % 60000 / 1000) + '.' + num_pad(t % 1000 / 10) + ']';
+}
+
+/**
+ * same_line 同行合并
+ * @param String olrc 
+ * @param String tlrc 
+ */
+
+function lrc_merge_same_line(olrc, tlrc) {
+    var olrc = lrc_timeline(olrc), tlrc = lrc_timeline(tlrc), lrc = [];
+    var i = 0, j = 0;
+    while (i < olrc.length && j < tlrc.length) {
+        var cmp = olrc[i].time_ms - tlrc[j].time_ms;
+        if (cmp == 0) {
+            lrc.push(olrc[i].time + olrc[i].text + bracket[0] + tlrc[j].text + bracket[1]);
+            i++; j++;
+        } else if (cmp < 0) {
+            lrc.push(olrc[i].time + olrc[i].text);
+            i++;
+        } else {
+            j++;
+            debug && console('unsynced translation:' + tlrc[j].time + tlrc[j].text);
+        }
+    }
+    return lrc.join("\n");
+}
+
+/**
+ * new_line 将翻译添加到下一句原文前 savefix 时长处
+ * @param String olrc 
+ * @param String tlrc 
+ */
+
+function lrc_merge_new_line(olrc, tlrc) {
+    var olrc = lrc_timeline(olrc), tlrc = lrc_timeline(tlrc), lrc = [];
+    var i = 0, j = 0;
+    while (i < olrc.length && j < tlrc.length) {
+        var t_time = timestamp_to_str((i + 1 < olrc.length) ? olrc[i + 1].time_ms - savefix * 1000 : olrc[i].time_ms + new_line_last * 1000);
+        var cmp = olrc[i].time_ms - tlrc[j].time_ms;
+        if (cmp <= 0) {
+            lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text);
+            lrc.push(t_time + ((cmp == 0) ? bracket[0] + tlrc[j].text + bracket[1] : ''));
+            i++; (cmp == 0) && j++;
+        } else {
+            j++;
+            debug && console('unsynced translation:' + tlrc[j].time + tlrc[j].text);
+        }
+    }
+    return lrc.join("\n");
+}
+
+/**
+ * same_line_k 将翻译带时间轴添加到原文后面（同一行）
+ * @param String olrc 
+ * @param String tlrc 
+ */
+
+function lrc_merge_same_line_k(olrc, tlrc) {
+    var olrc = lrc_timeline(olrc), tlrc = lrc_timeline(tlrc), lrc = [];
+    var i = 0, j = 0;
+    while (i < olrc.length && j < tlrc.length) {
+        var t_time = timestamp_to_str((i + 1 < olrc.length) ? olrc[i + 1].time_ms - savefix * 1000 : olrc[i].time_ms + new_line_last * 1000);
+        var cmp = olrc[i].time_ms - tlrc[j].time_ms;
+        if (cmp == 0) {
+            lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text + '　' + t_time + bracket[0] + tlrc[j].text + bracket[1]);
+            i++; j++;
+        } else if (cmp < 0) {
+            lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text);
+            i++;
+        } else {
+            j++;
+            debug && console('unsynced translation:' + tlrc[j].time + tlrc[j].text);
+        }
+    }
+    return lrc.join("\n");
+}
+
+/**
+ * 辅助函数, 库或 polyfills
  */
 
 /**
@@ -370,202 +513,6 @@ function json(text) {
         return false;
     }
 }
-
-/**
- * 歌词处理/合并
- */
-
-/**
- * 
- * @param {*} olrc 
- * @param {*} tlrc 
- */
-
-function lrc_merge(olrc, tlrc) {
-    olrc = olrc.split("\n");
-    tlrc = tlrc.split("\n");
-    var o_f = olrc[0].indexOf("[by:");
-    if (o_f == 0) {
-        var o_b = olrc[0].indexOf("]");
-        var o = (o_f != -1 && o_b != -1) ? olrc[0].substring(4, o_b) : "";
-
-        var t_f = tlrc[0].indexOf("[by:");
-        var t_b = tlrc[0].indexOf("]");
-        var t = (t_f != -1 && t_b != -1) ? olrc[0].substring(4, o_b) : "";
-        olrc[0] = "[by:" + o + "/译:" + t + "]";
-    }
-    for (var ii = 5,set=0,counter; ii < 10; ii++) {//玄学取set...
-        counter = olrc[ii].indexOf("]");
-        // debug &&console(ii+':'+counter);
-        counter = (counter == -1) ? 9 : counter;
-        set+=counter;
-    }
-	set = Math.round(set/5);
-    var i = 0;
-    var l = tlrc.length;
-    var lrc = [];
-    for (var k in olrc) {
-        var a = olrc[k].substring(1, set);
-        while (i < l) {
-            var j = 0;
-            var tf = 0;
-            while (j < 5) {
-                if (i + j >= l) break;
-                var b = tlrc[i + j].substring(1, set);
-                if (a == b) {
-                    tf = 1;
-                    i += j;
-                    break;
-                }
-                j++;
-            }
-            if (tf == 0) {
-                lrc[k] = olrc[k];
-                break;
-            }
-            var c = tlrc[i].substr(set + 1);
-            if (c) {
-                lrc[k] = olrc[k] + bracket[0] + tlrc[i].substr(set + 1) + bracket[1];
-                i++;
-                break;
-            } else {
-                lrc[k] = olrc[k];
-                break;
-            }
-        }
-    }
-    return lrc.join("\n");
-
-}
-
-function lrc_newtype(olrc, tlrc, merge_type) {
-    olrc = olrc.split("\n");
-    tlrc = tlrc.split("\n");
-    /*
-    var o_f = olrc[0].indexOf("[by:");
-    if (o_f == 0) {
-        var o_b = olrc[0].indexOf("]");
-        var o = (o_f != -1 && o_b != -1) ? olrc[0].substring(4, o_b) : "";
-
-        var t_f = tlrc[0].indexOf("[by:");
-        var t_b = tlrc[0].indexOf("]");
-        var t = (t_f != -1 && t_b != -1) ? olrc[0].substring(4, o_b) : "";
-        olrc[0] = "[by:" + o + "/译:" + t + "]";
-    }
-    */
-    for (var ii = 5,set=0,counter; ii < 10; ii++) {//玄学取set...
-        counter = olrc[ii].indexOf("]");
-        // debug &&console(ii+':'+counter);
-        counter = (counter == -1) ? 9 : counter;
-        set+=counter;
-    }
-    set = Math.round(set/5);
-    // debug &&console("set:"+set);
-    var i = 0;
-    var l = tlrc.length;
-    var lrc = new Array();
-    var r = new Array();
-    for (var k in olrc) {
-        var a = olrc[k].substring(1, set);
-        if (i >= l) break;//防溢出数组
-        var j = 0;
-        var tf = 0;//标记变量,时间轴符合置1
-        while (j < 5) {
-            if (i + j >= l) break;//防溢出数组
-            var b = tlrc[i + j].substring(1, set);
-            if (a == b) {
-                tf = 1;
-                i += j;
-                break;
-            }
-            j++;
-        }
-        if (tf == 0) {
-            r.push([k, false, a]);
-        } else {
-            r.push([k, i, a]);
-        }
-
-    }
-    var l_r = r.length;
-
-    if (merge_type) {
-        for (var kk = 0; kk < l_r; kk++) {
-            o = r[kk][0];
-            t = r[kk][1];
-            var o_lrc=olrc[o].substr(set + 1);
-            o_lrc=o_lrc?olrc[o]:"["+r[kk][2]+"]  ";
-            lrc.push(o_lrc);
-            var t_lrc = t !==false && tlrc[t].substr(set + 1) ? bracket[0] + tlrc[t].substr(set + 1) + bracket[1] : " ";
-            if (kk + 2 > l_r) break;
-            if (r[kk + 1][2]) {
-                var timeb = r[kk + 1][2].replace(/(])/, "");
-
-                if (savefix) {
-                    var x = parseInt(timeb.substr(0, 2));
-                    var y = parseFloat(timeb.substr(3, set - 4));
-                    var ut = x * 60 + y - savefix;
-                    var time = "[" + prefix(Math.floor(ut / 60),2) + ":" + prefix((ut % 60).toFixed(2),5) + "]";
-                    // debug && console(time);
-                } else var time = "[" + timeb + "]";
-            } else {
-                var x = parseInt(r[kk][2].substr(0, 2));
-                var y = parseInt(r[kk][2].substr(3, 2));
-                var z = r[kk][2].substr(5, 3);
-                var ut = x * 60 + y + 4;
-                var time = "[" + prefix(Math.floor(ut / 60),2) + ":" + prefix((ut % 60).toFixed(2),5) + "]";
-                // debug && console(time);
-            }
-
-            lrc.push(time + t_lrc);
-        }
-    } else {
-        if (timefix&&offset) lrc.push("[offset:"+offset+"]");
-        for (var kk = 0; kk < l_r; kk++) {
-            o = r[kk][0];
-            t = r[kk][1];
-            var o_lrc=olrc[o].substr(set + 1);
-            o_lrc=o_lrc?olrc[o]:"["+r[kk][2]+"]  ";//重要：空格
-            var t_lrc = t !==false && tlrc[t].substr(set + 1) ? bracket[0] + tlrc[t].substr(set + 1) + bracket[1] : " ";
-            if (kk + 2 > l_r) break;
-            if (r[kk + 1][2]) {
-                var timeb = r[kk + 1][2].replace(/(])/, "");
-                // debug &&console("timeb="+timeb);
-
-                if (timefix) {
-                    var x = parseInt(timeb.substr(0, 2));
-                    var y = parseFloat(timeb.substr(3, set - 4));
-                    var ut = x * 60 + y + timefix;
-                    var time = "[" + prefix(Math.floor(ut / 60),2) + ":" + prefix((ut % 60).toFixed(2),5) + "]";
-                    // debug &&console("time="+time);
-                } else {var time = "[" + timeb + "]";}
-                lrc.push(o_lrc + " " + time + t_lrc);
-            } else {
-                var x = parseInt(r[kk][2].substr(0, 2));
-                var y = parseInt(r[kk][2].substr(3, 2));
-                var z = r[kk][2].substr(5, 3);
-                var ut = x * 60 + y + 4;
-                var time = "[" + prefix(Math.floor(ut / 60),2) + ":" + prefix((ut % 60).toFixed(2),5) + "]";
-                lrc.push(o_lrc + " " + time + t_lrc);
-                lrc.push(time+"-End-");
-                // debug && console(time);
-            }
-            // debug &&console(o_lrc + time + t_lrc);
-
-        }
-
-
-    }
-
-
-    // debug && console("lyric length:" + lrc.length);
-    return lrc.join("\n");
-
-}
-
-/**
- * 库函数或 polyfills
- */
 
 // 简繁转换
 

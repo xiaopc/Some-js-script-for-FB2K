@@ -48,6 +48,10 @@ var bracket = [
 // 要从翻译中删除的括号
 var bracket_rm = /(〔|〕|〈|〉|《|》|「|」|『|』|〖|〗|【|】|{|}|\/)/g;
 
+// 去除空行
+//   在 new_line 时，若空行时间不准确，空行会导致歌词提前消失
+var rm_empty = false;
+
 // - 搜索
 
 // 搜索请求返回的最多结果数,如果经常搜不到试着改小或改大
@@ -107,121 +111,13 @@ function start_search(info, callback) {
         "info.Title: " + info.Title + "\n" +
         "info.Artist: " + info.Artist + "\n" +
         "info.Length:" + info.Length);
-    // 获取匹配歌曲，精确后模糊
-    var lyricInfo = getLyricInfo(info, true);
-    if (!lyricInfo) {
-        debug && console("exact searching failed.");
-        lyricInfo = getLyricInfo(info, false);
-    }
-    if (!lyricInfo)  return false;
-
-    var songs = lyricInfo[0];
-    var songid = lyricInfo[1];
-    var res_id = songs[songid].id;
-    var res_name = info.Title + songs[songid].name.substr(lyricInfo[2].length); // 必须要完整包括搜索的曲名才能添加？
-    var res_album = songs[songid].album.name;
-    var res_artist = songs[songid].artist_combine;
-    debug && console("selected #" + res_id + ": " + res_name + "-" + res_artist);
-
-    // 获取歌曲对应歌词
-    var lyricURL = "https://music.163.com/api/song/lyric?os=pc&id=" + res_id + "&lv=-1&kv=-1&tv=-1";
-    try {
-        xmlHttp.Open("GET", lyricURL, false);
-        // xmlHttp.Option(4) = 13056;  // 应为 5: WinHttpRequestOption_SelectCertificate
-        // xmlHttp.Option(6) = false; // WinHttpRequestOption_EnableRedirects
-        xmlHttp.SetRequestHeader("Cookie", "appver=1.5.0.75771");
-        xmlHttp.SetRequestHeader("Referer", "https://music.163.com/");
-        xmlHttp.SetRequestHeader("Connection", "Close");
-        xmlHttp.Send();
-    } catch (e) {
-        debug && console("request for lyric api failed.");
-        return;
-    }
-    if (xmlHttp.Status != 200) {
-        debug && console("request for lyric api failed.");
-        return;
-    }
-
-    // 处理/添加歌词
-    var ncm_lrc = json(xmlHttp.responseText);
-    // （原语言）歌词
-    var lyric = false;
-    if (ncm_lrc.lrc && ncm_lrc.lrc.lyric)
-        lyric = ncm_lrc.lrc.lyric;
-    else
-        debug && console("no (original) lyric");
-    // 翻译歌词
-    var tranlrc = false;
-    if (ncm_lrc.tlyric && ncm_lrc.tlyric.lyric) {
-        tranlrc = ncm_lrc.tlyric.lyric;
-        tranlrc = tranlrc.replace(bracket_rm, "");
-    } else debug && console("no translation");
-    // 顺序默认值
-    lrc_order = lrc_order || ["same_line_k", "new_line", "origin", "tran"];
-    // 回调开始
-    var newLyric = callback.CreateLyric();
-    for (var key in lrc_order) {
-        newLyric.Title = res_name;
-        newLyric.Artist = res_artist;
-        newLyric.Album = res_album;
-        switch (lrc_order[key]) {
-            case "origin" :
-                if (lyric) {
-                    newLyric.LyricText = lyric;
-                    newLyric.Source = "(原词)" + get_my_name();
-                    callback.AddLyric(newLyric);
-                }
-                break;
-            case "tran" :
-                if (tranlrc) {
-                    newLyric.LyricText = tranlrc;
-                    newLyric.Source = "(翻译)" + get_my_name();
-                    callback.AddLyric(newLyric);
-                }
-                break;
-            case "same_line_k" :
-                if (lyric && tranlrc) {
-                    newLyric.LyricText = lrc_merge_same_line_k(lyric, tranlrc);
-                    newLyric.Source = "(并排-测试)" + get_my_name();
-                    callback.AddLyric(newLyric);
-                }
-                break;
-            case "new_line":
-                if (lyric && tranlrc) {
-                    newLyric.LyricText = lrc_merge_new_line(lyric, tranlrc);
-                    newLyric.Source = "(并列)" + get_my_name();
-                    callback.AddLyric(newLyric);
-                }
-                break;
-            case "same_line" :
-                if (lyric && tranlrc) {
-                    newLyric.LyricText = lrc_merge_same_line(lyric, tranlrc);
-                    newLyric.Source = "(并排)" + get_my_name();
-                    callback.AddLyric(newLyric);
-                }
-                break;
-        }
-    }
-    newLyric.Dispose();
-}
-
-/**
- * 以歌曲信息搜索网易云对应歌曲
- * @param Object info 
- * @param Boolean exact 是否精确搜索
- */
-
-function getLyricInfo(info, exact) {
     // 删除冗余内容
     var title = del(info.Title, rm_suffix);
     var artist = del(info.Artist, rm_suffix);
-    debug && console(
-        "search_title: " + title + "\n" +
-        "search_artist: " + artist);
-
+    debug && console("search_title: " + title + "\n" + "search_artist: " + artist);
     // 搜索语句
     var s = title + " " + (artist ? artist : "");
-    //searchURL = "http://music.163.com/api/search/get/web?csrf_token=";//如果下面的没用,试试改成这句
+    // searchURL = "http://music.163.com/api/search/get/web?csrf_token=";//如果下面的没用,试试改成这句
     var searchURL = "https://music.163.com/api/search/get/";
     var post_data = 'hlpretag=<span class="s-fc7">&hlposttag=</span>&s=' + encodeURIComponent(s) + '&type=1&offset=0&total=true&limit=' + limit;
     try {
@@ -233,12 +129,9 @@ function getLyricInfo(info, exact) {
         xmlHttp.SetRequestHeader("Referer", "https://music.163.com/search/");
         xmlHttp.SetRequestHeader("Connection", "Close");
         xmlHttp.Send(post_data);
+        if (xmlHttp.Status != 200) throw 'HTTP.Status=' + xmlHttp.Status;
     } catch (e) {
-        debug && console("request for search api failed");
-        return;
-    }
-    if (xmlHttp.Status != 200) {
-        debug && console("request for search api failed");
+        debug && console("request for search api failed: " + e);
         return;
     }
     // parse 返回 json
@@ -248,51 +141,151 @@ function getLyricInfo(info, exact) {
         debug && console("get info failed");
         return;
     }
-    //筛选曲名及艺术家
+    // 筛选曲名及艺术家
     var songs = result.songs;
-    var song_id = -1;
-    for (var k in songs) {
-        var ncm_name = songs[k].name;
-        // 不知道为什么 ESLyric 会把繁体转换成简体
-        ncm_name = simplized(ncm_name);
-        // 去除曲名中的后缀
-        cmp_name = del(ncm_name, rm_suffix);
-        // 匹配曲名
-        var p0 = compare(title, cmp_name);
-        debug && console("ncm_title: " + ncm_name + " match: " + p0);
-        // 模糊匹配
-        if (!exact) {
-            if (p0 >= min_fuzzy_matching) {
-                song_id = k;
-                break;
-            } else {
+    var times = 0; // 第一遍精确搜索，第二遍模糊搜索
+    var songid = -1;
+    var fetchlyric = [null, null];
+    // 获取匹配歌曲，先精确后模糊
+    while (times < 2 && songid < 0) {
+        for (var k in songs) {
+            var ncm_name = songs[k].name;
+            // 不知道为什么 ESLyric 会把繁体转换成简体
+            ncm_name = simplized(ncm_name);
+            // 去除曲名中的后缀
+            cmp_name = del(ncm_name, rm_suffix);
+            // 匹配曲名
+            var p0 = compare(title, cmp_name);
+            debug && console("ncm_title: " + ncm_name + " match: " + p0);
+            // 匹配时长
+            var length_diff = Math.abs(songs[k].duration / 1000 - info.Length) / info.Length;
+            debug && console("duration: " + songs[k].duration / 1000 + "s, delta: " + length_diff);
+            if (length_error_rate > 0 && length_diff > length_error_rate / 100)
                 continue;
+            // 模糊匹配
+            if (times > 0) {
+                if (p0 >= min_fuzzy_matching && (fetchlyric = get_lyric_from_id(songs[k].id))[0] != null) { // 同时获取歌曲对应歌词
+                    songid = k;
+                    break;
+                } else {
+                    continue;
+                }
+            }
+            // 精确匹配之匹配艺术家
+            var artist_combine = [];
+            // 合并艺术家信息
+            for (var key in songs[k].artists) {
+                artist_combine.push(simplized(songs[k].artists[key].name));
+            }
+            songs[k].artist_combine = artist_combine.join("/");
+            // 匹配艺术家
+            var p1 = compare(artist, songs[k].artist_combine);
+            debug && console("ncm_artist: " + songs[k].artist_combine + " match: " + p1);
+            if (p0 >= min_exact_matching[0] && p1 >= min_exact_matching[1] && (fetchlyric = get_lyric_from_id(songs[k].id))[0] != null) {
+                songid = k;
+                break;
             }
         }
-        // 匹配时长
-        var length_diff = Math.abs(songs[k].duration / 1000 - info.Length) / info.Length;
-        debug && console("duration: " + songs[k].duration / 1000 + "s, delta: " + length_diff);
-        if (length_error_rate > 0 && length_diff > length_error_rate / 100)
-            continue;
-        // 精确匹配之匹配艺术家
-        var artist_combine = [];
-        // 合并艺术家信息
-        for (var key in songs[k].artists) {
-            artist_combine.push(simplized(songs[k].artists[key].name));
-        }
-        songs[k].artist_combine = artist_combine.join("/");
-        // 匹配艺术家
-        var p1 = compare(artist, songs[k].artist_combine);
-        debug && console("ncm_artist: " + songs[k].artist_combine + " match: " + p1);
-        if (p0 >= min_exact_matching[0] && p1 >= min_exact_matching[1]) {
-            song_id = k;
-            break;
+        times++;
+    }
+    if (songid >= 0) {
+        // 处理歌曲基础信息
+        var res_name = info.Title + songs[songid].name.substr(title.length); // 必须要完整包括搜索的曲名才能添加？
+        var res_album = songs[songid].album.name;
+        var res_artist = (times > 1 ? info.Artist + '(原) - ' : '' ) + songs[songid].artist_combine; // 必须要完整包括搜索的艺术家才能添加？
+        debug && console("selected #" + songs[songid].id + ": " + res_name + "-" + res_artist);
+        insert_lyric(callback, fetchlyric, [res_name, res_artist, res_album]);               
+    }
+}
+
+/**
+ * 插入歌词
+ * @param {*} callback 
+ * @param Array fetchlyric [string | null, string | null]
+ * @param Array info [res_name, res_artist, res_album]
+ */
+
+function insert_lyric(callback, fetchlyric, info) {
+    var newLyric = callback.CreateLyric();
+    // 顺序默认值
+    lrc_order = lrc_order || ["same_line_k", "new_line", "origin", "tran"];
+    for (var key in lrc_order) {
+        newLyric.Title = info[0];
+        newLyric.Artist = info[1];
+        newLyric.Album = info[2];
+        switch (lrc_order[key]) {
+            case "origin" :
+                if (fetchlyric[0]) {
+                    newLyric.LyricText = fetchlyric[0];
+                    newLyric.Source = "(原词)" + get_my_name();
+                    callback.AddLyric(newLyric);
+                }
+                break;
+            case "tran" :
+                if (fetchlyric[1]) {
+                    newLyric.LyricText = fetchlyric[1];
+                    newLyric.Source = "(翻译)" + get_my_name();
+                    callback.AddLyric(newLyric);
+                }
+                break;
+            case "same_line_k" :
+                if (fetchlyric[0] && fetchlyric[1]) {
+                    newLyric.LyricText = lrc_merge_same_line_k(fetchlyric[0], fetchlyric[1]);
+                    newLyric.Source = "(并排-测试)" + get_my_name();
+                    callback.AddLyric(newLyric);
+                }
+                break;
+            case "new_line":
+                if (fetchlyric[0] && fetchlyric[1]) {
+                    newLyric.LyricText = lrc_merge_new_line(fetchlyric[0], fetchlyric[1]);
+                    newLyric.Source = "(并列)" + get_my_name();
+                    callback.AddLyric(newLyric);
+                }
+                break;
+            case "same_line" :
+                if (fetchlyric[0] && fetchlyric[1]) {
+                    newLyric.LyricText = lrc_merge_same_line(fetchlyric[0], fetchlyric[1]);
+                    newLyric.Source = "(并排)" + get_my_name();
+                    callback.AddLyric(newLyric);
+                }
+                break;
         }
     }
-    if (song_id == -1)
+    newLyric.Dispose();
+}
+
+/**
+ * 获取歌曲对应歌词
+ * @param Number id 
+ */
+function get_lyric_from_id(id) {
+    var lyricURL = "https://music.163.com/api/song/lyric?os=pc&id=" + id + "&lv=-1&kv=-1&tv=-1";
+    try {
+        xmlHttp.Open("GET", lyricURL, false);
+        xmlHttp.SetRequestHeader("Cookie", "appver=1.5.0.75771");
+        xmlHttp.SetRequestHeader("Referer", "https://music.163.com/");
+        xmlHttp.SetRequestHeader("Connection", "Close");
+        xmlHttp.Send();
+        if (xmlHttp.Status != 200) throw 'HTTP.Status=' + xmlHttp.Status;
+    } catch (e) {
+        debug && console("request for lyric api failed: " + e);
         return;
+    }
+    // 处理/添加歌词
+    var ncm_lrc = json(xmlHttp.responseText);
+    // （原语言）歌词
+    var lyric = null;
+    if (ncm_lrc.lrc && ncm_lrc.lrc.lyric)
+        lyric = ncm_lrc.lrc.lyric;
     else
-        return [songs, song_id, title];
+        debug && console("no (original) lyric");
+    // 翻译歌词
+    var translrc = null;
+    if (ncm_lrc.tlyric && ncm_lrc.tlyric.lyric) {
+        translrc = ncm_lrc.tlyric.lyric;
+        translrc = translrc.replace(bracket_rm, "");
+    } else debug && console("no translation");
+    return [lyric, translrc];
 }
 
 /**
@@ -370,10 +363,12 @@ function lrc_merge_same_line(olrc, tlrc) {
     while (i < olrc.length && j < tlrc.length) {
         var cmp = olrc[i].time_ms - tlrc[j].time_ms;
         if (cmp == 0) {
-            lrc.push(olrc[i].time + olrc[i].text + bracket[0] + tlrc[j].text + bracket[1]);
+            if (!rm_empty || olrc[i].text != '')
+                lrc.push(olrc[i].time + olrc[i].text + bracket[0] + tlrc[j].text + bracket[1]);
             i++; j++;
         } else if (cmp < 0) {
-            lrc.push(olrc[i].time + olrc[i].text);
+            if (!rm_empty || olrc[i].text != '')
+                lrc.push(olrc[i].time + olrc[i].text);
             i++;
         } else {
             j++;
@@ -396,8 +391,10 @@ function lrc_merge_new_line(olrc, tlrc) {
         var t_time = timestamp_to_str((i + 1 < olrc.length) ? olrc[i + 1].time_ms - savefix * 1000 : olrc[i].time_ms + new_line_last * 1000);
         var cmp = olrc[i].time_ms - tlrc[j].time_ms;
         if (cmp <= 0) {
-            lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text);
-            lrc.push(t_time + ((cmp == 0) ? bracket[0] + tlrc[j].text + bracket[1] : ''));
+            if (!rm_empty || olrc[i].text != ''){
+                lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text);
+                lrc.push(t_time + ((cmp == 0) ? bracket[0] + tlrc[j].text + bracket[1] : ''));
+            }
             i++; (cmp == 0) && j++;
         } else {
             j++;
@@ -420,10 +417,12 @@ function lrc_merge_same_line_k(olrc, tlrc) {
         var t_time = timestamp_to_str((i + 1 < olrc.length) ? olrc[i + 1].time_ms - savefix * 1000 : olrc[i].time_ms + new_line_last * 1000);
         var cmp = olrc[i].time_ms - tlrc[j].time_ms;
         if (cmp == 0) {
-            lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text + '　' + t_time + bracket[0] + tlrc[j].text + bracket[1]);
+            if (!rm_empty || olrc[i].text != '')
+                lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text + '　' + t_time + bracket[0] + tlrc[j].text + bracket[1]);
             i++; j++;
         } else if (cmp < 0) {
-            lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text);
+            if (!rm_empty || olrc[i].text != '')
+                lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text);
             i++;
         } else {
             j++;
@@ -443,7 +442,7 @@ function lrc_merge_same_line_k(olrc, tlrc) {
  */
 
 function console(s) {
-    fb.trace("* lyric-js: \n" + s);
+    fb.trace("* lyric-js: " + s);
 }
 
 /**

@@ -55,12 +55,12 @@ var rm_empty = false;
 // - 搜索
 
 // 搜索请求返回的最多结果数,如果经常搜不到试着改小或改大
-var limit = 4;
+var limit = 5;
 
 // 去除标题附加内容
 var rm_suffix = [
     "feat.",
-    "（Cover：",
+    "（Cover",
     "（翻自",
 ]
 
@@ -154,6 +154,7 @@ function start_search(info, callback) {
             ncm_name = simplized(ncm_name);
             // 去除曲名中的后缀
             cmp_name = del(ncm_name, rm_suffix);
+            cmp_name = cmp_name.replace(/\xa0/g, ' ');
             // 匹配曲名
             var p0 = compare(title, cmp_name);
             debug && console("ncm_title: " + ncm_name + " match: " + p0);
@@ -187,6 +188,7 @@ function start_search(info, callback) {
             }
         }
         times++;
+        debug && console(times + "# search finished");
     }
     if (songid >= 0) {
         // 处理歌曲基础信息

@@ -60,12 +60,13 @@ var limit = 5;
 // 去除标题附加内容
 var rm_suffix = [
     "feat.",
+    "Featuring",
     "（Cover",
     "（翻自",
 ]
 
 // 最小准确匹配度，分别为标题和艺术家字段
-var min_exact_matching = [85, 80];
+var min_exact_matching = [85, 70];
 
 // 最小模糊匹配度
 // 模糊匹配：不考虑艺术家字段

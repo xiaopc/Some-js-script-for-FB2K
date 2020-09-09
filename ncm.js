@@ -62,8 +62,15 @@ var rm_suffix = [
     "feat.",
     "Featuring",
     "（Cover",
+    "（cover",
     "（翻自",
 ]
+
+// 开启简繁转换
+//   由于 ESLyric 会将繁体歌曲信息转为简体去搜索，这会导致匹配不上等问题
+//   「本程式使用了繁化姬的 API 服務」，「繁化姬商用必須付費」。https://zhconvert.org/
+//   由于连接速度等问题，开启后可能会降低歌词搜索速度，酌情开启
+var trad_to_simp = false;
 
 // 与网易云标题对比时，去除半角括号/全角括号中的内容
 //   分别为半角和全角的开关，若不需要可改为 false
@@ -92,8 +99,12 @@ var debug = true;
 
 var xmlHttp = new ActiveXObject("WinHttp.WinHttpRequest.5.1");
 
-//if(debug)
-//    xmlHttp.SetProxy(2, "127.0.0.1:8888");
+var headers = {
+    "Origin": "https://music.163.com",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) (KHTML, like Gecko) Chrome/55.0.2919.83 Safari/537.36",
+    "Referer": "https://music.163.com/search/"
+}
+// "Content-Type": "application/x-www-form-urlencoded",
 
 function get_my_name() {
     return "网易云音乐";
@@ -127,22 +138,11 @@ function start_search(info, callback) {
     // searchURL = "http://music.163.com/api/search/get/web?csrf_token=";//如果下面的没用,试试改成这句
     var searchURL = "https://music.163.com/api/search/get/";
     var post_data = 'hlpretag=<span class="s-fc7">&hlposttag=</span>&s=' + encodeURIComponent(s) + '&type=1&offset=0&total=true&limit=' + limit;
-    try {
-        xmlHttp.Open("POST", searchURL, false);
-        xmlHttp.SetRequestHeader("Host", "music.163.com");
-        xmlHttp.SetRequestHeader("Origin", "https://music.163.com");
-        xmlHttp.SetRequestHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) (KHTML, like Gecko) Chrome/55.0.2919.83 Safari/537.36");
-        xmlHttp.SetRequestHeader("Content-Type", "application/x-www-form-urlencoded");
-        xmlHttp.SetRequestHeader("Referer", "https://music.163.com/search/");
-        xmlHttp.SetRequestHeader("Connection", "Close");
-        xmlHttp.Send(post_data);
-        if (xmlHttp.Status != 200) throw 'HTTP.Status=' + xmlHttp.Status;
-    } catch (e) {
-        debug && console("request for search api failed: " + e);
-        return;
-    }
+    ncm_back = request("POST", searchURL, headers, post_data);
+    // 先转简体
+    if (trad_to_simp) ncm_back = zhconvert(ncm_back, "Simplified");
     // parse 返回 json
-    var ncm_back = json(xmlHttp.responseText);
+    var ncm_back = json(ncm_back);
     var result = ncm_back.result;
     if (ncm_back.code != 200 || !result || !result.songs.length) {
         debug && console("get info failed");
@@ -154,7 +154,6 @@ function start_search(info, callback) {
     var songid = -1;
     var fetchlyric = [null, null];
     var p0, p1;
-
     var found_action = function () {
         // 处理歌曲基础信息
         var res_name = info.Title; // 必须要完整包括搜索的曲名才能添加？
@@ -165,14 +164,12 @@ function start_search(info, callback) {
         else if (times == 0 && p1 > 99) res_artist = info.Artist; // 顺序相反可能导致无法添加
         else res_artist = songs[songid].artist_combine;
         debug && console("selected #" + songs[songid].id + ": " + res_name + "-" + res_artist);
-        insert_lyric(callback, fetchlyric, [res_name, res_artist, res_album]);  
+        insert_lyric(callback, fetchlyric, [res_name, res_artist, res_album]);
     };
     // 获取匹配歌曲，先精确后模糊
     while (times < 2 && songid < 0) {
         for (var k in songs) {
             var ncm_name = songs[k].name;
-            // 不知道为什么 ESLyric 会把繁体转换成简体
-            ncm_name = simplized(ncm_name);
             // 去除曲名中的后缀
             cmp_name = del(ncm_name, rm_suffix);
             cmp_name = cmp_name.replace(/\xa0/g, ' ');
@@ -201,7 +198,7 @@ function start_search(info, callback) {
             var artist_combine = [];
             // 合并艺术家信息
             for (var key in songs[k].artists) {
-                artist_combine.push(simplized(songs[k].artists[key].name));
+                artist_combine.push(songs[k].artists[key].name);
             }
             songs[k].artist_combine = artist_combine.join("/");
             // 匹配艺术家
@@ -233,42 +230,38 @@ function insert_lyric(callback, fetchlyric, info) {
         newLyric.Artist = info[1];
         newLyric.Album = info[2];
         switch (lrc_order[key]) {
-            case "origin" :
+            case "origin":
                 if (fetchlyric[0]) {
                     newLyric.LyricText = fetchlyric[0];
                     newLyric.Source = "(原词)" + get_my_name();
-                    callback.AddLyric(newLyric);
                 }
                 break;
-            case "tran" :
+            case "tran":
                 if (fetchlyric[1]) {
                     newLyric.LyricText = fetchlyric[1];
                     newLyric.Source = "(翻译)" + get_my_name();
-                    callback.AddLyric(newLyric);
                 }
                 break;
-            case "same_line_k" :
+            case "same_line_k":
                 if (fetchlyric[0] && fetchlyric[1]) {
                     newLyric.LyricText = lrc_merge_same_line_k(fetchlyric[0], fetchlyric[1]);
                     newLyric.Source = "(并排β)" + get_my_name();
-                    callback.AddLyric(newLyric);
                 }
                 break;
             case "new_line":
                 if (fetchlyric[0] && fetchlyric[1]) {
                     newLyric.LyricText = lrc_merge_new_line(fetchlyric[0], fetchlyric[1]);
                     newLyric.Source = "(并列)" + get_my_name();
-                    callback.AddLyric(newLyric);
                 }
                 break;
-            case "same_line" :
+            case "same_line":
                 if (fetchlyric[0] && fetchlyric[1]) {
                     newLyric.LyricText = lrc_merge_same_line(fetchlyric[0], fetchlyric[1]);
                     newLyric.Source = "(并排)" + get_my_name();
-                    callback.AddLyric(newLyric);
                 }
                 break;
         }
+        callback.AddLyric(newLyric);
     }
     newLyric.Dispose();
 }
@@ -279,19 +272,7 @@ function insert_lyric(callback, fetchlyric, info) {
  */
 function get_lyric_from_id(id) {
     var lyricURL = "https://music.163.com/api/song/lyric?os=pc&id=" + id + "&lv=-1&kv=-1&tv=-1";
-    try {
-        xmlHttp.Open("GET", lyricURL, false);
-        xmlHttp.SetRequestHeader("Cookie", "appver=1.5.0.75771");
-        xmlHttp.SetRequestHeader("Referer", "https://music.163.com/");
-        xmlHttp.SetRequestHeader("Connection", "Close");
-        xmlHttp.Send();
-        if (xmlHttp.Status != 200) throw 'HTTP.Status=' + xmlHttp.Status;
-    } catch (e) {
-        debug && console("request for lyric api failed: " + e);
-        return;
-    }
-    // 处理/添加歌词
-    var ncm_lrc = json(xmlHttp.responseText);
+    var ncm_lrc = json(request("GET", lyricURL, { "Cookie": "appver=1.5.0.75771" }));
     // （原语言）歌词
     var lyric = null;
     if (ncm_lrc.lrc && ncm_lrc.lrc.lyric)
@@ -331,7 +312,7 @@ function lrc_timeline(lrc) {
             continue;
         }
         for (var j in times) {
-            objs.push({time: times[j][0], time_ms: timestamp_to_ms(times[j]), text: parts[2]});
+            objs.push({ time: times[j][0], time_ms: timestamp_to_ms(times[j]), text: parts[2] });
         }
     }
     var cmp = function (a, b) {
@@ -410,7 +391,7 @@ function lrc_merge_new_line(olrc, tlrc) {
         var t_time = timestamp_to_str((i + 1 < olrc.length) ? olrc[i + 1].time_ms - savefix * 1000 : olrc[i].time_ms + new_line_last * 1000);
         var cmp = olrc[i].time_ms - tlrc[j].time_ms;
         if (cmp <= 0) {
-            if (!rm_empty || olrc[i].text != ''){
+            if (!rm_empty || olrc[i].text != '') {
                 lrc.push(timestamp_to_str(olrc[i].time_ms) + olrc[i].text);
                 lrc.push(t_time + ((cmp == 0) ? bracket[0] + tlrc[j].text + bracket[1] : ''));
             }
@@ -509,16 +490,6 @@ function compare(x, y) {
 }
 
 /**
- * 取字符串前 n
- * @param {*} num 
- * @param {*} length 
- */
-
-function prefix(num, length) {
-    return (Array(length).join('0') + num).slice(-length);
-}
-
-/**
  * JSON 解析包装
  * @param {*} text 
  */
@@ -532,62 +503,48 @@ function json(text) {
     }
 }
 
-// 简繁转换
-
-function JTPYStr() {
-    return '皑蔼碍爱翱袄奥坝罢摆败颁办绊帮绑镑谤剥饱宝报鲍辈贝钡狈备惫绷笔毕毙闭边编贬变辩辫鳖瘪濒滨宾摈饼拨钵铂驳卜补参蚕残惭惨灿苍舱仓沧厕侧册测层诧搀掺蝉馋谗缠铲产阐颤场尝长偿肠厂畅钞车彻尘陈衬撑称惩诚骋痴迟驰耻齿炽冲虫宠畴踌筹绸丑橱厨锄雏础储触处传疮闯创锤纯绰辞词赐聪葱囱从丛凑窜错达带贷担单郸掸胆惮诞弹当挡党荡档捣岛祷导盗灯邓敌涤递缔点垫电淀钓调迭谍叠钉顶锭订东动栋冻斗犊独读赌镀锻断缎兑队对吨顿钝夺鹅额讹恶饿儿尔饵贰发罚阀珐矾钒烦范贩饭访纺飞废费纷坟奋愤粪丰枫锋风疯冯缝讽凤肤辐抚辅赋复负讣妇缚该钙盖干赶秆赣冈刚钢纲岗皋镐搁鸽阁铬个给龚宫巩贡钩沟构购够蛊顾剐关观馆惯贯广规硅归龟闺轨诡柜贵刽辊滚锅国过骇韩汉阂鹤贺横轰鸿红后壶护沪户哗华画划话怀坏欢环还缓换唤痪焕涣黄谎挥辉毁贿秽会烩汇讳诲绘荤浑伙获货祸击机积饥讥鸡绩缉极辑级挤几蓟剂济计记际继纪夹荚颊贾钾价驾歼监坚笺间艰缄茧检碱硷拣捡简俭减荐槛鉴践贱见键舰剑饯渐溅涧浆蒋桨奖讲酱胶浇骄娇搅铰矫侥脚饺缴绞轿较秸阶节茎惊经颈静镜径痉竞净纠厩旧驹举据锯惧剧鹃绢杰洁结诫届紧锦仅谨进晋烬尽劲荆觉决诀绝钧军骏开凯颗壳课垦恳抠库裤夸块侩宽矿旷况亏岿窥馈溃扩阔蜡腊莱来赖蓝栏拦篮阑兰澜谰揽览懒缆烂滥捞劳涝乐镭垒类泪篱离里鲤礼丽厉励砾历沥隶俩联莲连镰怜涟帘敛脸链恋炼练粮凉两辆谅疗辽镣猎临邻鳞凛赁龄铃凌灵岭领馏刘龙聋咙笼垄拢陇楼娄搂篓芦卢颅庐炉掳卤虏鲁赂禄录陆驴吕铝侣屡缕虑滤绿峦挛孪滦乱抡轮伦仑沦纶论萝罗逻锣箩骡骆络妈玛码蚂马骂吗买麦卖迈脉瞒馒蛮满谩猫锚铆贸么霉没镁门闷们锰梦谜弥觅绵缅庙灭悯闽鸣铭谬谋亩钠纳难挠脑恼闹馁腻撵捻酿鸟聂啮镊镍柠狞宁拧泞钮纽脓浓农疟诺欧鸥殴呕沤盘庞国爱赔喷鹏骗飘频贫苹凭评泼颇扑铺朴谱脐齐骑岂启气弃讫牵扦钎铅迁签谦钱钳潜浅谴堑枪呛墙蔷强抢锹桥乔侨翘窍窃钦亲轻氢倾顷请庆琼穷趋区躯驱龋颧权劝却鹊让饶扰绕热韧认纫荣绒软锐闰润洒萨鳃赛伞丧骚扫涩杀纱筛晒闪陕赡缮伤赏烧绍赊摄慑设绅审婶肾渗声绳胜圣师狮湿诗尸时蚀实识驶势释饰视试寿兽枢输书赎属术树竖数帅双谁税顺说硕烁丝饲耸怂颂讼诵擞苏诉肃虽绥岁孙损笋缩琐锁獭挞抬摊贪瘫滩坛谭谈叹汤烫涛绦腾誊锑题体屉条贴铁厅听烃铜统头图涂团颓蜕脱鸵驮驼椭洼袜弯湾顽万网韦违围为潍维苇伟伪纬谓卫温闻纹稳问瓮挝蜗涡窝呜钨乌诬无芜吴坞雾务误锡牺袭习铣戏细虾辖峡侠狭厦锨鲜纤咸贤衔闲显险现献县馅羡宪线厢镶乡详响项萧销晓啸蝎协挟携胁谐写泻谢锌衅兴汹锈绣虚嘘须许绪续轩悬选癣绚学勋询寻驯训讯逊压鸦鸭哑亚讶阉烟盐严颜阎艳厌砚彦谚验鸯杨扬疡阳痒养样瑶摇尧遥窑谣药爷页业叶医铱颐遗仪彝蚁艺亿忆义诣议谊译异绎荫阴银饮樱婴鹰应缨莹萤营荧蝇颖哟拥佣痈踊咏涌优忧邮铀犹游诱舆鱼渔娱与屿语吁御狱誉预驭鸳渊辕园员圆缘远愿约跃钥岳粤悦阅云郧匀陨运蕴酝晕韵杂灾载攒暂赞赃脏凿枣灶责择则泽贼赠扎札轧铡闸诈斋债毡盏斩辗崭栈战绽张涨帐账胀赵蛰辙锗这贞针侦诊镇阵挣睁狰帧郑证织职执纸挚掷帜质钟终种肿众诌轴皱昼骤猪诸诛烛瞩嘱贮铸筑驻专砖转赚桩庄装妆壮状锥赘坠缀谆浊兹资渍踪综总纵邹诅组钻致钟么为只凶准启板里雳余链泄';
-}
-
-function FTPYStr() {
-    return '皚藹礙愛翺襖奧壩罷擺敗頒辦絆幫綁鎊謗剝飽寶報鮑輩貝鋇狽備憊繃筆畢斃閉邊編貶變辯辮鼈癟瀕濱賓擯餅撥缽鉑駁蔔補參蠶殘慚慘燦蒼艙倉滄廁側冊測層詫攙摻蟬饞讒纏鏟産闡顫場嘗長償腸廠暢鈔車徹塵陳襯撐稱懲誠騁癡遲馳恥齒熾沖蟲寵疇躊籌綢醜櫥廚鋤雛礎儲觸處傳瘡闖創錘純綽辭詞賜聰蔥囪從叢湊竄錯達帶貸擔單鄲撣膽憚誕彈當擋黨蕩檔搗島禱導盜燈鄧敵滌遞締點墊電澱釣調叠諜疊釘頂錠訂東動棟凍鬥犢獨讀賭鍍鍛斷緞兌隊對噸頓鈍奪鵝額訛惡餓兒爾餌貳發罰閥琺礬釩煩範販飯訪紡飛廢費紛墳奮憤糞豐楓鋒風瘋馮縫諷鳳膚輻撫輔賦複負訃婦縛該鈣蓋幹趕稈贛岡剛鋼綱崗臯鎬擱鴿閣鉻個給龔宮鞏貢鈎溝構購夠蠱顧剮關觀館慣貫廣規矽歸龜閨軌詭櫃貴劊輥滾鍋國過駭韓漢閡鶴賀橫轟鴻紅後壺護滬戶嘩華畫劃話懷壞歡環還緩換喚瘓煥渙黃謊揮輝毀賄穢會燴彙諱誨繪葷渾夥獲貨禍擊機積饑譏雞績緝極輯級擠幾薊劑濟計記際繼紀夾莢頰賈鉀價駕殲監堅箋間艱緘繭檢堿鹼揀撿簡儉減薦檻鑒踐賤見鍵艦劍餞漸濺澗漿蔣槳獎講醬膠澆驕嬌攪鉸矯僥腳餃繳絞轎較稭階節莖驚經頸靜鏡徑痙競淨糾廄舊駒舉據鋸懼劇鵑絹傑潔結誡屆緊錦僅謹進晉燼盡勁荊覺決訣絕鈞軍駿開凱顆殼課墾懇摳庫褲誇塊儈寬礦曠況虧巋窺饋潰擴闊蠟臘萊來賴藍欄攔籃闌蘭瀾讕攬覽懶纜爛濫撈勞澇樂鐳壘類淚籬離裏鯉禮麗厲勵礫曆瀝隸倆聯蓮連鐮憐漣簾斂臉鏈戀煉練糧涼兩輛諒療遼鐐獵臨鄰鱗凜賃齡鈴淩靈嶺領餾劉龍聾嚨籠壟攏隴樓婁摟簍蘆盧顱廬爐擄鹵虜魯賂祿錄陸驢呂鋁侶屢縷慮濾綠巒攣孿灤亂掄輪倫侖淪綸論蘿羅邏鑼籮騾駱絡媽瑪碼螞馬罵嗎買麥賣邁脈瞞饅蠻滿謾貓錨鉚貿麽黴沒鎂門悶們錳夢謎彌覓綿緬廟滅憫閩鳴銘謬謀畝鈉納難撓腦惱鬧餒膩攆撚釀鳥聶齧鑷鎳檸獰甯擰濘鈕紐膿濃農瘧諾歐鷗毆嘔漚盤龐國愛賠噴鵬騙飄頻貧蘋憑評潑頗撲鋪樸譜臍齊騎豈啓氣棄訖牽扡釺鉛遷簽謙錢鉗潛淺譴塹槍嗆牆薔強搶鍬橋喬僑翹竅竊欽親輕氫傾頃請慶瓊窮趨區軀驅齲顴權勸卻鵲讓饒擾繞熱韌認紉榮絨軟銳閏潤灑薩鰓賽傘喪騷掃澀殺紗篩曬閃陝贍繕傷賞燒紹賒攝懾設紳審嬸腎滲聲繩勝聖師獅濕詩屍時蝕實識駛勢釋飾視試壽獸樞輸書贖屬術樹豎數帥雙誰稅順說碩爍絲飼聳慫頌訟誦擻蘇訴肅雖綏歲孫損筍縮瑣鎖獺撻擡攤貪癱灘壇譚談歎湯燙濤縧騰謄銻題體屜條貼鐵廳聽烴銅統頭圖塗團頹蛻脫鴕馱駝橢窪襪彎灣頑萬網韋違圍爲濰維葦偉僞緯謂衛溫聞紋穩問甕撾蝸渦窩嗚鎢烏誣無蕪吳塢霧務誤錫犧襲習銑戲細蝦轄峽俠狹廈鍁鮮纖鹹賢銜閑顯險現獻縣餡羨憲線廂鑲鄉詳響項蕭銷曉嘯蠍協挾攜脅諧寫瀉謝鋅釁興洶鏽繡虛噓須許緒續軒懸選癬絢學勳詢尋馴訓訊遜壓鴉鴨啞亞訝閹煙鹽嚴顔閻豔厭硯彥諺驗鴦楊揚瘍陽癢養樣瑤搖堯遙窯謠藥爺頁業葉醫銥頤遺儀彜蟻藝億憶義詣議誼譯異繹蔭陰銀飲櫻嬰鷹應纓瑩螢營熒蠅穎喲擁傭癰踴詠湧優憂郵鈾猶遊誘輿魚漁娛與嶼語籲禦獄譽預馭鴛淵轅園員圓緣遠願約躍鑰嶽粵悅閱雲鄖勻隕運蘊醞暈韻雜災載攢暫贊贓髒鑿棗竈責擇則澤賊贈紮劄軋鍘閘詐齋債氈盞斬輾嶄棧戰綻張漲帳賬脹趙蟄轍鍺這貞針偵診鎮陣掙睜猙幀鄭證織職執紙摯擲幟質鍾終種腫衆謅軸皺晝驟豬諸誅燭矚囑貯鑄築駐專磚轉賺樁莊裝妝壯狀錐贅墜綴諄濁茲資漬蹤綜總縱鄒詛組鑽緻鐘麼為隻兇準啟闆裡靂餘鍊洩';
-}
-
-function traditionalized(cc) {
-    var str = '',
-    ss = JTPYStr(),
-    tt = FTPYStr();
-    for (var i = 0; i < cc.length; i++) {
-        if (cc.charCodeAt(i) > 10000 && ss.indexOf(cc.charAt(i)) != -1) str += tt.charAt(ss.indexOf(cc.charAt(i)));
-        else str += cc.charAt(i);
+function request(method, url, headers, data) {
+    try {
+        xmlHttp.Open(method, url, false);
+        add_headers(headers, xmlHttp);
+        if (method == "POST") {
+            add_headers({ "Content-Type": "application/x-www-form-urlencoded" }, xmlHttp);
+            xmlHttp.Send(data);
+        } else {
+            xmlHttp.Send();
+        }
+        if (xmlHttp.Status != 200) throw 'HTTP.Status=' + xmlHttp.Status;
+    } catch (e) {
+        debug && console("request " + url + " failed: " + e);
+        return;
     }
-    return str;
+    return xmlHttp.responseText;
 }
 
-function simplized(cc) {
-    var str = '',
-    ss = JTPYStr(),
-    tt = FTPYStr();
-    for (var i = 0; i < cc.length; i++) {
-        if (cc.charCodeAt(i) > 10000 && tt.indexOf(cc.charAt(i)) != -1) str += ss.charAt(tt.indexOf(cc.charAt(i)));
-        else str += cc.charAt(i);
+/**
+ * 给 xmlhttp 加 header
+ * @param {*} header 
+ * @param Object client 
+ */
+
+function add_headers(header, client) {
+    for (var i in header) {
+        client.SetRequestHeader(i, header[i]);
     }
-    return str;
 }
 
-// JSON polyfill
+/**
+ * 由「繁化姬」提供的转换服务，API 文档：https://docs.zhconvert.org/api/convert/
+ * @param String text 
+ * @param String converter: ‘Simplified’ 简体化，‘Traditional’ 繁体化
+ */
 
-if(typeof JSON!=='object'){JSON={};}
- (function(){'use strict';function f(n){return n<10?'0'+n:n;}
- if(typeof Date.prototype.toJSON!=='function'){Date.prototype.toJSON=function(key){return isFinite(this.valueOf())?this.getUTCFullYear()+'-'+
- f(this.getUTCMonth()+1)+'-'+
- f(this.getUTCDate())+'T'+
- f(this.getUTCHours())+':'+
- f(this.getUTCMinutes())+':'+
- f(this.getUTCSeconds())+'Z':null;};String.prototype.toJSON=Number.prototype.toJSON=Boolean.prototype.toJSON=function(key){return this.valueOf();};}
- var cx=/[\u0000\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,escapable=/[\\\"\x00-\x1f\x7f-\x9f\u00ad\u0600-\u0604\u070f\u17b4\u17b5\u200c-\u200f\u2028-\u202f\u2060-\u206f\ufeff\ufff0-\uffff]/g,gap,indent,meta={'\b':'\\b','\t':'\\t','\n':'\\n','\f':'\\f','\r':'\\r','"':'\\"','\\':'\\\\'},rep;function quote(string){escapable.lastIndex=0;return escapable.test(string)?'"'+string.replace(escapable,function(a){var c=meta[a];return typeof c==='string'?c:'\\u'+('0000'+a.charCodeAt(0).toString(16)).slice(-4);})+'"':'"'+string+'"';}
- function str(key,holder){var i,k,v,length,mind=gap,partial,value=holder[key];if(value&&typeof value==='object'&&typeof value.toJSON==='function'){value=value.toJSON(key);}
- if(typeof rep==='function'){value=rep.call(holder,key,value);}
- switch(typeof value){case'string':return quote(value);case'number':return isFinite(value)?String(value):'null';case'boolean':case'null':return String(value);case'object':if(!value){return'null';}
- gap+=indent;partial=[];if(Object.prototype.toString.apply(value)==='[object Array]'){length=value.length;for(i=0;i<length;i+=1){partial[i]=str(i,value)||'null';}
- v=partial.length===0?'[]':gap?'[\n'+gap+partial.join(',\n'+gap)+'\n'+mind+']':'['+partial.join(',')+']';gap=mind;return v;}
- if(rep&&typeof rep==='object'){length=rep.length;for(i=0;i<length;i+=1){if(typeof rep[i]==='string'){k=rep[i];v=str(k,value);if(v){partial.push(quote(k)+(gap?': ':':')+v);}}}}else{for(k in value){if(Object.prototype.hasOwnProperty.call(value,k)){v=str(k,value);if(v){partial.push(quote(k)+(gap?': ':':')+v);}}}}
- v=partial.length===0?'{}':gap?'{\n'+gap+partial.join(',\n'+gap)+'\n'+mind+'}':'{'+partial.join(',')+'}';gap=mind;return v;}}
- if(typeof JSON.stringify!=='function'){JSON.stringify=function(value,replacer,space){var i;gap='';indent='';if(typeof space==='number'){for(i=0;i<space;i+=1){indent+=' ';}}else if(typeof space==='string'){indent=space;}
- rep=replacer;if(replacer&&typeof replacer!=='function'&&(typeof replacer!=='object'||typeof replacer.length!=='number')){throw new Error('JSON.stringify');}
- return str('',{'':value});};}
- if(typeof JSON.parse!=='function'){JSON.parse=function(text,reviver){var j;function walk(holder,key){var k,v,value=holder[key];if(value&&typeof value==='object'){for(k in value){if(Object.prototype.hasOwnProperty.call(value,k)){v=walk(value,k);if(v!==undefined){value[k]=v;}else{delete value[k];}}}}
- return reviver.call(holder,key,value);}
- text=String(text);cx.lastIndex=0;if(cx.test(text)){text=text.replace(cx,function(a){return'\\u'+
- ('0000'+a.charCodeAt(0).toString(16)).slice(-4);});}
- if(/^[\],:{}\s]*$/.test(text.replace(/\\(?:["\\\/bfnrt]|u[0-9a-fA-F]{4})/g,'@').replace(/"[^"\\\n\r]*"|true|false|null|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?/g,']').replace(/(?:^|:|,)(?:\s*\[)+/g,''))){j=eval('('+text+')');return typeof reviver==='function'?walk({'':j},''):j;}
- throw new SyntaxError('JSON.parse');};}}());
+function zhconvert(text, converter) {
+    var post_data = 'converter=' + converter + '&text=' + encodeURIComponent(text);
+    var response = json(request("POST", "https://api.zhconvert.org/convert", {}, post_data));
+    if (response.code != 0) {
+        debug && console("zhconvert api: " + response.msg);
+        return;
+    }
+    return response.data.text;
+}

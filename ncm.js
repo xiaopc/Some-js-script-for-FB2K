@@ -65,6 +65,12 @@ var rm_suffix = [
     "（翻自",
 ]
 
+// 与网易云标题对比时，去除半角括号/全角括号中的内容
+//   分别为半角和全角的开关，若不需要可改为 false
+//   ESLyric 在搜索时好像会去除本地曲名中半角括号的部分，这会导致匹配度计算出现问题
+//   去除全角括号仅对网易云添加了（）内容的曲名有帮助，酌情开启
+var title_bracket = [true, true];
+
 // 最小准确匹配度，分别为标题和艺术家字段
 var min_exact_matching = [85, 70];
 
@@ -75,7 +81,7 @@ var min_fuzzy_matching = 80;
 // 匹配曲目时长误差率
 // 如本地曲目时长 3 分钟，误差率为 10%，则仅匹配时长在 3 分 ± 18s 的在线曲目
 // 小于 0 则不使用这条规则
-var length_error_rate = 25;
+var length_error_rate = 15;
 
 // 输出调试信息
 var debug = true;
@@ -138,7 +144,7 @@ function start_search(info, callback) {
     // parse 返回 json
     var ncm_back = json(xmlHttp.responseText);
     var result = ncm_back.result;
-    if (ncm_back.code != 200 || !result.songs.length) {
+    if (ncm_back.code != 200 || !result || !result.songs.length) {
         debug && console("get info failed");
         return;
     }
@@ -147,6 +153,20 @@ function start_search(info, callback) {
     var times = 0; // 第一遍精确搜索，第二遍模糊搜索
     var songid = -1;
     var fetchlyric = [null, null];
+    var p0, p1;
+
+    var found_action = function () {
+        // 处理歌曲基础信息
+        var res_name = info.Title; // 必须要完整包括搜索的曲名才能添加？
+        if (info.Title != songs[songid].name) res_name += songs[songid].name.replace(title, "");
+        var res_album = songs[songid].album.name;
+        var res_artist;
+        if (times > 0) res_artist = info.Artist + '(原) - ' + songs[songid].artist_combine; // 必须要完整包括搜索的艺术家才能添加？
+        else if (times == 0 && p1 > 99) res_artist = info.Artist; // 顺序相反可能导致无法添加
+        else res_artist = songs[songid].artist_combine;
+        debug && console("selected #" + songs[songid].id + ": " + res_name + "-" + res_artist);
+        insert_lyric(callback, fetchlyric, [res_name, res_artist, res_album]);  
+    };
     // 获取匹配歌曲，先精确后模糊
     while (times < 2 && songid < 0) {
         for (var k in songs) {
@@ -156,8 +176,13 @@ function start_search(info, callback) {
             // 去除曲名中的后缀
             cmp_name = del(ncm_name, rm_suffix);
             cmp_name = cmp_name.replace(/\xa0/g, ' ');
+            // 如果搜索关键词不含括号，而搜索结果含，则去除括号部分
+            if (title_bracket[0] && title.indexOf('(') < 0 && cmp_name.indexOf('(') >= 0)
+                cmp_name = cmp_name.replace(/\(.*\)/g, '');
+            if (title_bracket[1] && title.indexOf('（') < 0 && cmp_name.indexOf('（') >= 0)
+                cmp_name = cmp_name.replace(/（.*）/g, '');
             // 匹配曲名
-            var p0 = compare(title, cmp_name);
+            p0 = compare(title, cmp_name);
             debug && console("ncm_title: " + ncm_name + " match: " + p0);
             // 匹配时长
             var length_diff = Math.abs(songs[k].duration / 1000 - info.Length) / info.Length;
@@ -168,10 +193,9 @@ function start_search(info, callback) {
             if (times > 0) {
                 if (p0 >= min_fuzzy_matching && (fetchlyric = get_lyric_from_id(songs[k].id))[0] != null) { // 同时获取歌曲对应歌词
                     songid = k;
-                    break;
-                } else {
-                    continue;
+                    found_action();
                 }
+                continue;
             }
             // 精确匹配之匹配艺术家
             var artist_combine = [];
@@ -181,23 +205,15 @@ function start_search(info, callback) {
             }
             songs[k].artist_combine = artist_combine.join("/");
             // 匹配艺术家
-            var p1 = compare(artist, songs[k].artist_combine);
+            p1 = compare(artist, songs[k].artist_combine);
             debug && console("ncm_artist: " + songs[k].artist_combine + " match: " + p1);
             if (p0 >= min_exact_matching[0] && p1 >= min_exact_matching[1] && (fetchlyric = get_lyric_from_id(songs[k].id))[0] != null) {
                 songid = k;
-                break;
+                found_action();
             }
         }
         times++;
         debug && console(times + "# search finished");
-    }
-    if (songid >= 0) {
-        // 处理歌曲基础信息
-        var res_name = info.Title + songs[songid].name.substr(title.length); // 必须要完整包括搜索的曲名才能添加？
-        var res_album = songs[songid].album.name;
-        var res_artist = (times > 1 ? info.Artist + '(原) - ' : '' ) + songs[songid].artist_combine; // 必须要完整包括搜索的艺术家才能添加？
-        debug && console("selected #" + songs[songid].id + ": " + res_name + "-" + res_artist);
-        insert_lyric(callback, fetchlyric, [res_name, res_artist, res_album]);               
     }
 }
 
@@ -234,7 +250,7 @@ function insert_lyric(callback, fetchlyric, info) {
             case "same_line_k" :
                 if (fetchlyric[0] && fetchlyric[1]) {
                     newLyric.LyricText = lrc_merge_same_line_k(fetchlyric[0], fetchlyric[1]);
-                    newLyric.Source = "(并排-测试)" + get_my_name();
+                    newLyric.Source = "(并排β)" + get_my_name();
                     callback.AddLyric(newLyric);
                 }
                 break;

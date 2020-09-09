@@ -234,34 +234,38 @@ function insert_lyric(callback, fetchlyric, info) {
                 if (fetchlyric[0]) {
                     newLyric.LyricText = fetchlyric[0];
                     newLyric.Source = "(原词)" + get_my_name();
+                    callback.AddLyric(newLyric);
                 }
                 break;
             case "tran":
                 if (fetchlyric[1]) {
                     newLyric.LyricText = fetchlyric[1];
                     newLyric.Source = "(翻译)" + get_my_name();
+                    callback.AddLyric(newLyric);
                 }
                 break;
             case "same_line_k":
                 if (fetchlyric[0] && fetchlyric[1]) {
                     newLyric.LyricText = lrc_merge_same_line_k(fetchlyric[0], fetchlyric[1]);
                     newLyric.Source = "(并排β)" + get_my_name();
+                    callback.AddLyric(newLyric);
                 }
                 break;
             case "new_line":
                 if (fetchlyric[0] && fetchlyric[1]) {
                     newLyric.LyricText = lrc_merge_new_line(fetchlyric[0], fetchlyric[1]);
                     newLyric.Source = "(并列)" + get_my_name();
+                    callback.AddLyric(newLyric);
                 }
                 break;
             case "same_line":
                 if (fetchlyric[0] && fetchlyric[1]) {
                     newLyric.LyricText = lrc_merge_same_line(fetchlyric[0], fetchlyric[1]);
                     newLyric.Source = "(并排)" + get_my_name();
+                    callback.AddLyric(newLyric);
                 }
                 break;
         }
-        callback.AddLyric(newLyric);
     }
     newLyric.Dispose();
 }
@@ -502,6 +506,14 @@ function json(text) {
         return false;
     }
 }
+
+/**
+ * xmlHttp 包装
+ * @param String method “GET” “POST”
+ * @param String url 
+ * @param {*} headers 
+ * @param String data 
+ */
 
 function request(method, url, headers, data) {
     try {
